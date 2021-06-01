@@ -4,16 +4,15 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.http.Fault;
-import io.reactivex.rxjava3.core.Completable;
+import io.vertx.core.Future;
+import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClientOptions;
+import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpVersion;
 import io.vertx.core.net.PfxOptions;
 import io.vertx.ext.unit.TestContext;
 import io.vertx.ext.unit.junit.VertxUnitRunner;
-import io.vertx.rxjava3.CompletableHelper;
-import io.vertx.rxjava3.core.Vertx;
-import io.vertx.rxjava3.core.http.HttpClientRequest;
 import org.junit.*;
 import org.junit.runner.RunWith;
 import org.slf4j.Logger;
@@ -54,7 +53,7 @@ public class HttpClientRegressionTest {
   @After
   public void after(final TestContext context) {
     wiremock.resetAll();
-    vertx.rxClose().subscribe(CompletableHelper.toObserver(context.asyncAssertSuccess()));
+    vertx.close(context.asyncAssertSuccess());
   }
 
   @Test
@@ -72,23 +71,26 @@ public class HttpClientRegressionTest {
         .willReturn(aResponse().withStatus(200))
     );
     // WHEN
-    Completable.concatArray(
-      given.rxRequest(HttpMethod.GET, "/some/path").flatMap(HttpClientRequest::rxSend).ignoreElement()
-        .doOnComplete(() -> context.fail("expected an Exception here"))
-        .onErrorComplete()
-      ,
-      given.rxRequest(HttpMethod.GET, "/other/path").flatMap(HttpClientRequest::rxSend).ignoreElement()
-        .doOnError(context::fail)
-    )
-      .doOnComplete(() ->
+    given
+      .request(HttpMethod.GET, "/some/path").flatMap(HttpClientRequest::send).mapEmpty()
+      .onSuccess(nothing -> context.fail("expected an Exception here"))
+      .recover(cause -> Future.succeededFuture())
+
+      .flatMap(nothing ->
+        given
+          .request(HttpMethod.GET, "/other/path").flatMap(HttpClientRequest::send).mapEmpty()
+          .onFailure(context::fail)
+      )
+
+      .onSuccess(nothing ->
         // VERIFY
-        context.verify(nothing -> {
+        context.verify(nothing2 -> {
           wiremock.verify(1, getRequestedFor(urlEqualTo("/some/path")));
           wiremock.verify(1, getRequestedFor(urlEqualTo("/other/path")));
+          context.assertTrue(wiremock.findAllUnmatchedRequests().isEmpty());
         })
       )
-      // THEN
-      .subscribe(CompletableHelper.toObserver(context.asyncAssertSuccess()));
+      .onComplete(context.asyncAssertSuccess());
   }
 
   @Test
@@ -114,17 +116,18 @@ public class HttpClientRegressionTest {
         .willReturn(aResponse().withStatus(200))
     );
     // WHEN
-    Completable.concatArray(
-      given.rxRequest(HttpMethod.GET, "/successful/path").flatMap(HttpClientRequest::rxSend).ignoreElement()
-      ,
-      given.rxRequest(HttpMethod.GET, "/fault/path").flatMap(HttpClientRequest::rxSend).ignoreElement()
-      .onErrorComplete()
-      ,
-      given.rxRequest(HttpMethod.GET, "/dead/path").flatMap(HttpClientRequest::rxSend).ignoreElement()
-    )
-      .doOnComplete(() ->
+    given.request(HttpMethod.GET, "/successful/path").flatMap(HttpClientRequest::send).mapEmpty()
+      .flatMap(nothing ->
+        given.request(HttpMethod.GET, "/fault/path").flatMap(HttpClientRequest::send).mapEmpty()
+          .recover(cause -> Future.succeededFuture())
+      )
+      .flatMap(nothing ->
+        given.request(HttpMethod.GET, "/dead/path").flatMap(HttpClientRequest::send).mapEmpty()
+          .onFailure(cause -> logger.error("failed", cause))
+      )
+      .onSuccess(nothing ->
         // VERIFY
-        context.verify(nothing -> {
+        context.verify(nothing2 -> {
           wiremock.verify(1, getRequestedFor(urlEqualTo("/successful/path")));
           wiremock.verify(1, getRequestedFor(urlEqualTo("/fault/path")));
           wiremock.verify(1, getRequestedFor(urlEqualTo("/dead/path")));
@@ -132,6 +135,6 @@ public class HttpClientRegressionTest {
         })
       )
       // THEN
-      .subscribe(CompletableHelper.toObserver(context.asyncAssertSuccess()));
+      .onComplete(context.asyncAssertSuccess());
   }
 }
