@@ -20,7 +20,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 
@@ -92,7 +91,6 @@ public class HttpClientRegressionTest {
       .subscribe(CompletableHelper.toObserver(context.asyncAssertSuccess()));
   }
 
-  // simpler version of above test
   @Test
   public void shouldRequestAfterFaultHttp2(final TestContext context) {
     // GIVEN
